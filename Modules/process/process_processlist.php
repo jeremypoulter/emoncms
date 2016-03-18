@@ -210,9 +210,28 @@ class Process_ProcessList
         return $value;
     }
 
+	private function Notify($topic, $data)
+    {
+        $context = new ZMQContext();
+        $socket = $context->getSocket(ZMQ::SOCKET_PUSH, 'my pusher');
+        $socket->connect("tcp://localhost:5555");
+
+        $socket->send(json_encode(array(
+            'topic' => $topic,
+            'data' => $data
+        )));
+    }
+
     public function log_to_feed($id, $time, $value)
     {
         $this->feed->insert_data($id, $time, $time, $value);
+
+		$this->Notify("feed.emoncms.org", array(
+			'action' => 'new_feed_value',
+			'feed_id' => $id,
+			'time' => $time,
+			'value' => $value,
+		));
 
         return $value;
     }

@@ -4,6 +4,7 @@
 ?>
 <script type="text/javascript" src="<?php echo $path; ?>Modules/user/user.js"></script>
 <script type="text/javascript" src="<?php echo $path; ?>Modules/feed/feed.js"></script>
+<script type="text/javascript" src="<?php echo $path; ?>Lib/simpleWamp.js"></script>
 <script type="text/javascript" src="<?php echo $path; ?>Lib/tablejs/table.js"></script>
 <script type="text/javascript" src="<?php echo $path; ?>Lib/tablejs/custom-table-fields.js"></script>
 <link href="<?php echo $path; ?>Lib/bootstrap-datetimepicker-0.0.11/css/bootstrap-datetimepicker.min.css" rel="stylesheet">
@@ -228,16 +229,48 @@
     } });
   }
 
+  var websocketEnabled = false;
   var updater;
-  function updaterStart(func, interval){
+  function updaterStart()
+  {
+    clearInterval(updater);
+    var func = websocketEnabled ? table.draw : update;
+    var interval = websocketEnabled ? 500 : 5000;
+    updater = setInterval(func, interval);
+  }
+  function updaterStop()
+  {
     clearInterval(updater);
     updater = null;
-    if (interval > 0) updater = setInterval(func, interval);
   }
-  updaterStart(update, 5000);
+
+  var wamp = new simpleWamp('ws://' + window.location.hostname + ':9001', function ()
+  {
+    wamp.subscribe("feed.emoncms.org", function (data) 
+    {
+        console.log(data);
+
+        for (z in table.data)
+        {
+            if (table.data[z]['id'] == data.feed_id)
+            {
+                table.data[z]['time'] = data.time;
+                table.data[z]['value'] = data.value;
+            }
+        }
+        table.draw();
+    });
+
+    websocketEnabled = true;
+    updaterStart();
+  }, function (message, e)
+  {
+    websocketEnabled = false;
+    updaterStart();
+  });
 
   $("#table").bind("onEdit", function(e){
-    updaterStart(update, 0);
+    updaterStop();
   });
 
   $("#table").bind("onSave", function(e,id,fields_to_update){
@@ -245,11 +278,11 @@
   });
 
   $("#table").bind("onResume", function(e){
-    updaterStart(update, 5000);
+    updaterStart();
   });
 
   $("#table").bind("onDelete", function(e,id,row){
-    updaterStart(update, 0);
+    updaterStop();
     if (table.data[row]['engine'] == 7) { //Virtual
       $('#myModal #deleteFeedText').hide();
       $('#myModal #deleteVirtualFeedText').show();
@@ -270,7 +303,7 @@
     update();
 
     $('#myModal').modal('hide');
-    updaterStart(update, 5000);
+    updaterStart();
   });
 
   $("#refreshfeedsize").click(function(){

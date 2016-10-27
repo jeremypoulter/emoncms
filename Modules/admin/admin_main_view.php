@@ -13,13 +13,15 @@
     @list($system, $host, $kernel) = preg_split('/[\s,]+/', php_uname('a'), 5);
     @exec('ps ax | grep feedwriter.php | grep -v grep', $feedwriterproc);
     
-    $data = explode("\n", file_get_contents("/proc/meminfo"));
-    $meminfo = array();
-    foreach ($data as $line) {
-        if (strpos($line, ':') !== false) {
-            list($key, $val) = explode(":", $line);
-            $meminfo[$key] = 1024 * floatval( trim( str_replace( ' kB', '', $val ) ) );
-        }
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') { $meminfo = array(); } else { //Only do this on NON-Windows Platforms
+      $data = explode("\n", file_get_contents("/proc/meminfo"));
+      $meminfo = array();
+      foreach ($data as $line) {
+          if (strpos($line, ':') !== false) {
+              list($key, $val) = explode(":", $line);
+              $meminfo[$key] = 1024 * floatval( trim( str_replace( ' kB', '', $val ) ) );
+          }
+      }
     }
 
     return array('date' => date('Y-m-d H:i:s T'),
@@ -121,8 +123,18 @@
       }
       return $partitions;
   }
- 
- ?>
+
+$emoncms_modules = NULL;
+$emoncmsModulesPath = substr($_SERVER['SCRIPT_FILENAME'], 0, strrpos($_SERVER['SCRIPT_FILENAME'], '/')).'/Modules';
+$emoncmsModuleFolders = glob("$emoncmsModulesPath/*/.git", GLOB_BRACE);                                                 // find all the subfolders containing a .git file
+        foreach($emoncmsModuleFolders as $emoncmsModuleFolder) {                                                        // loop through the folders
+        $emoncmsModuleFolder = str_replace($emoncmsModulesPath."/", '', $emoncmsModuleFolder);                          // clean up the formatting, removing the path from the $emoncmsModulesPath variable
+        $emoncmsModuleFolder = str_replace("/.git", '', $emoncmsModuleFolder);                                          // more clean up to remove /.git from the end of the output
+        if ($emoncmsModuleFolder == 'app' || $emoncmsModuleFolder == 'config' || $emoncmsModuleFolder == 'dashboard' || $emoncmsModuleFolder == 'graph' || $emoncmsModuleFolder == 'wifi') {$emoncmsModuleFolder = "<b>".$emoncmsModuleFolder."</b>";}
+        if (!is_null($emoncms_modules)) { $emoncms_modules = $emoncms_modules.", ".$emoncmsModuleFolder; } else {$emoncms_modules = $emoncmsModuleFolder;} // add the commas as appropriate
+        }
+
+?>
 <style>
 pre {
     width:100%;
@@ -192,6 +204,7 @@ if(is_writable($log_filename)) {
 <?php if(is_writable($log_filename)) { ?>
                     <br>
                     <button id="getlog" type="button" class="btn btn-info" data-toggle="button" aria-pressed="false" autocomplete="off"><?php echo _('Auto refresh'); ?></button>
+                    <a href="<?php echo $path; ?>admin/downloadlog" class="btn btn-info"><?php echo _('Download log'); ?></a>
 <?php } ?>
                 </td>
             </tr>
@@ -216,7 +229,8 @@ if ($allow_emonpi_admin) {
                     <p>Note: If using emonBase (Raspberry Pi + RFM69Pi) the updater can still be used to update Emoncms, RFM69Pi firmware will not be changed.</p> 
                 </td>
                 <td class="buttons" style="border-top: 0px"><br>
-                    <button id="emonpiupdate" class="btn btn-info"><?php echo _('Update Now'); ?></button><br><br>
+                    <button id="emonpiupdate" class="btn btn-info"><?php echo _('Update Now'); ?></button>
+                    <a href="<?php echo $path; ?>admin/emonpi/downloadupdatelog" class="btn btn-info"><?php echo _('Download log'); ?></a><br><br>
                 </td>
             </tr>
             <tr>
@@ -234,6 +248,7 @@ if ($allow_emonpi_admin) {
             <h3><?php echo _('Server Information'); ?></h3>
             <table class="table table-hover table-condensed">
               <tr><td><b>Emoncms</b></td><td><?php echo _('Version'); ?></td><td><?php echo $emoncms_version; ?></td></tr>
+              <tr><td class="subinfo"></td><td>Modules</td><td><?php echo $emoncms_modules; ?></td></tr>
 <?php
 if ($feed_settings['redisbuffer']['enabled']) {
 ?>
@@ -264,7 +279,7 @@ if ($redis_enabled) {
 }
 if ($mqtt_enabled) {
 ?>
-              <tr><td><b>MQTT</b></td><td>Version</td><td><?php echo "n/a"; ?></td></tr>
+              <tr><td><b>MQTT</b></td><td>Version</td><td><?php if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') { echo "n/a"; } else { if (file_exists('/usr/sbin/mosquitto')) { echo exec('/usr/sbin/mosquitto -h | grep -oP \'(?<=mosquitto\sversion\s)[0-9.]+(?=\s*\(build)\''); } } ?></td></tr>
               <tr><td class="subinfo"></td><td>Host</td><td><?php echo $system['mqtt_server']. ":" . $system['mqtt_port'] . ' (' . $system['mqtt_ip'] . ')'; ?></td></tr>
 <?php
 }
@@ -272,13 +287,18 @@ if ($mqtt_enabled) {
 // Raspberry Pi
 if ( @exec('ifconfig | grep b8:27:eb:') ) {
               echo "<tr><td><b>Pi</b></td><td>CPU Temp</td><td>".number_format((int)@exec('cat /sys/class/thermal/thermal_zone0/temp')/1000, '2', '.', '')."&degC".chkRebootBtn()."</td></tr>\n";
+              foreach (glob("/boot/emonSD-*") as $emonpiRelease) {
+                $emonpiRelease = str_replace("/boot/", '', $emonpiRelease); 
+                echo "<tr><td class=\"subinfo\"></td><td>Release</td><td>".$emonpiRelease."</td></tr>\n";
+              }
 }
 
+if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {} else { //Only do this on NON-Windows Platforms
 // Ram information
-              $sysRamUsed = $system['mem_info']['MemTotal'] - $system['mem_info']['MemFree'];
+              $sysRamUsed = $system['mem_info']['MemTotal'] - $system['mem_info']['MemFree'] - $system['mem_info']['Buffers'] - $system['mem_info']['Cached'];
               $sysRamPercent = sprintf('%.2f',($sysRamUsed / $system['mem_info']['MemTotal']) * 100);
               echo "<tr><td><b>Memory</b></td><td>RAM</td><td><div class='progress progress-info' style='margin-bottom: 0;'><div class='bar' style='width: ".$sysRamPercent."%;'>Used&nbsp;".$sysRamPercent."%</div></div>";
-              echo "<b>Total:</b> ".formatSize($system['mem_info']['MemTotal'])."<b> Used:</b> ".formatSize($sysRamUsed)."<b> Free:</b> ".formatSize($system['mem_info']['MemFree'])."</td></tr>\n";
+              echo "<b>Total:</b> ".formatSize($system['mem_info']['MemTotal'])."<b> Used:</b> ".formatSize($sysRamUsed)."<b> Free:</b> ".formatSize($system['mem_info']['MemTotal'] - $sysRamUsed)."</td></tr>\n";
               
               if ($system['mem_info']['SwapTotal'] > 0) {
                 $sysSwapUsed = $system['mem_info']['SwapTotal'] - $system['mem_info']['SwapFree'];
@@ -303,6 +323,7 @@ if ( @exec('ifconfig | grep b8:27:eb:') ) {
                       }
                     }
                 }
+} //End the stuff we dont do on Windows
 ?>
               <tr><td><b>PHP</b></td><td>Version</td><td colspan="2"><?php echo $system['php'] . ' (' . "Zend Version" . ' ' . $system['zend'] . ')'; ?></td></tr>
               <tr><td class="subinfo"></td><td>Modules</td><td colspan="2"><?php while (list($key, $val) = each($system['php_modules'])) { echo "$val &nbsp; "; } ?></td></tr>
